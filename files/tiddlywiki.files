@@ -1,0 +1,47 @@
+{
+	"tiddlers": [
+		{
+			"file": "server.js",
+			"fields": {
+				  "type": "application/javascript",
+				  "title": "$:/plugins/jlazarow/pdfserve/server.js",
+				  "module-type": "library"
+			}
+		},{
+			"file": "store.js",
+			"fields": {
+				  "type": "application/javascript",
+				  "title": "$:/plugins/jlazarow/pdfserve/store.js",
+				  "module-type": "library"
+			}
+		},{
+			"file": "hummus-pdf.js",
+			"fields": {
+				  "type": "application/javascript",
+				  "title": "$:/plugins/jlazarow/pdfserve/hummus-pdf.js",
+				  "module-type": "library"
+			}
+		},{
+			"file": "syncer.js",
+			"fields": {
+				  "type": "application/javascript",
+				  "title": "$:/plugins/jlazarow/pdfserve/syncer.js",
+				  "module-type": "library"
+			}
+		},{
+			"file": "pdfapi.js",
+			"fields": {
+				  "type": "application/javascript",
+				  "title": "$:/plugins/jlazarow/pdfserve/pdfapi.js",
+				  "module-type": "library"
+			}
+		},{
+			"file": "tokenizer.js",
+			"fields": {
+				  "type": "application/javascript",
+				  "title": "$:/plugins/jlazarow/pdfserve/tokenizer.js",
+				  "module-type": "library"
+			}
+		}
+	        ]
+}

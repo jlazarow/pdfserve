@@ -1,0 +1,7 @@
+type: application/json
+title: $:/plugins/jlazarow/pdfserve/config 
+
+{
+  "configuration": {
+  }
+}
