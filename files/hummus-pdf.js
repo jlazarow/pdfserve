@@ -177,11 +177,12 @@ PDFForm.prototype.read = function() {
     // create an in-memory PDF of the given object.
     var stream = new streams.WritableStream();
     var result = pdf.createWriter(
-        new pdf.PDFStreamForResponse(stream));
+        new pdf.PDFStreamForResponse(stream), { "compress": false });
 
     // maybe can optimize this to use existing stream - didn't seem obvious.
     var copy = result.createPDFCopyingContext(this.document.path);
     var destID = copy.copyObject(this.objectID);
+    console.log("placing XObject " + this.objectID + " into " + destID);
 
     // create a page with just enough room.
     var page = result.createPage(this.x, this.y, this.width, this.height);
@@ -194,9 +195,16 @@ PDFForm.prototype.read = function() {
     result.writePage(page).end();
     stream.end();
 
-    this.data = stream.toBuffer();
+    // I believe there is some sort of timing issue here.
 
-    return this.data;
+    this.data = stream.toBuffer();
+    //console.log(this.data);
+
+    // this is infuriating.
+    //var temporaryPath = "/tmp/" + Math.random().toString() + ".pdf"
+    //var debugFile = fs.writeFileSync(temporaryPath, this.data);
+
+    return this.data; //temporaryPath;
 }
     
 function PDFImage(document, parent, image) {
@@ -223,13 +231,13 @@ function PDFImage(document, parent, image) {
         this.attributes, PDFImage.DecodeParametersKey);
 
     if (decodeParametersValue != undefined) {
-        console.log("decode parameters present");
+        //console.log("decode parameters present");
         this.decodeParameters = decodeParametersValue;
     }
 
     if (softMaskValue != undefined) {
-        console.log("found soft mask. exciting");
-        console.log(softMaskValue);
+        //console.log("found soft mask. exciting");
+        //console.log(softMaskValue);
         this.softMask = new PDFImage(this.document, null, softMaskValue);
     }
     
@@ -250,7 +258,7 @@ function PDFImage(document, parent, image) {
                 this.document.reader.queryDictionaryObject(this.attributes, PDFImage.BitsPerComponentKey).value);
         }
         else if (specialName == PDFColorSpace.ICCBasedColorSpace) {
-            console.log("encountered ICC-based color");
+            //console.log("encountered ICC-based color");
             var ignore = new PDFICCBasedColorSpace(
                 this.document,
                 this.document.reader.queryArrayObject(colorValue, 1),
@@ -293,10 +301,10 @@ PDFImage.SoftMaskKey = "SMask";
 PDFImage.DecodeParametersKey = "DecodeParms";    
 
 PDFImage.prototype.read = function() {
-    console.log("reading image start");
+    //console.log("reading image start");
     var softMaskData = null;
     if (this.softMask != null) {
-        console.log("reading soft mask first");
+        //console.log("reading soft mask first");
         var softMaskStream = this.document.reader.startReadingFromStream(this.softMask.image);
 
         // this is always "device gray".
@@ -337,7 +345,7 @@ PDFImage.prototype.read = function() {
 
                 // only handle 8-bit for now.
                 if (predictorValue >= 10 && this.color.bitsPerComponent == 8) {
-                    console.log("predictor 10 in use... investigating");
+                    //console.log("predictor 10 in use... investigating");
                     var verbatimStream = this.document.reader.startReadingFromStreamForPlainCopying(this.image);
                     var verbatimData = Buffer.from(verbatimStream.read(this.length));
                     var inflatedData = zlib.inflateSync(verbatimData);
@@ -438,7 +446,7 @@ PDFImage.prototype.read = function() {
                         }
                     }
 
-                    console.log("unpredicted to size " + unpredictedData.length);
+                    //console.log("unpredicted to size " + unpredictedData.length);
                     data = unpredictedData;
                 }
             }
@@ -447,7 +455,7 @@ PDFImage.prototype.read = function() {
         // todo: generalize this.
         if (this.color.bitsPerComponent == 1) {
             // manually "expand" these sub-byte images.
-            console.log("special handling of bpp " + this.color.bitsPerComponent);
+            //console.log("special handling of bpp " + this.color.bitsPerComponent);
             var expandedData = [];
             
             // note that row boundaries don't share bytes.
@@ -480,7 +488,7 @@ PDFImage.prototype.read = function() {
         }
         else if (this.color.bitsPerComponent == 4) {
             // manually "expand" these sub-byte images.
-            console.log("special handling of bpp " + this.color.bitsPerComponent);
+            //console.log("special handling of bpp " + this.color.bitsPerComponent);
             var expandedData = [];
             
             // note that row boundaries don't share bytes.
@@ -511,9 +519,9 @@ PDFImage.prototype.read = function() {
 
         // but if the softmask is present, we get an upgrade.
         if (softMaskData != null) {
-            console.log("applying softmask with number components: " + numberComponents);
+            //console.log("applying softmask with number components: " + numberComponents);
             colorType = PDFColorSpace.PNGColorTypeAlphaMap[this.color.kind];
-            console.log("upgraded color type to " + colorType);
+            //console.log("upgraded color type to " + colorType);
 
             // fix up data. this is slow. make it better.
             var mergedData = [];
@@ -587,20 +595,44 @@ function PDFDocumentOutlineItem(document, item) {
 
 PDFDocumentOutlineItem.TitleKey = "Title";
 
-// Optional (mutually exclusive with "Actions");
+// optional (mutually exclusive with "Actions");
 PDFDocumentOutlineItem.DestKey = "Dest";    
-
+// sometimes these are encoded as goto actions. (e.g. when I do them manually in Acrobat).
+PDFDocumentOutlineItem.ActionKey = "A";
+PDFDocumentOutlineItem.ActionNameKey = "S";
+PDFDocumentOutlineItem.NamedDestinationKey = "D";
+    
 PDFDocumentOutlineItem.prototype.read = function() {
+    //console.log("outline item?");
     this.title = this.document.reader.queryDictionaryObject(
         this.item, PDFDocumentOutlineItem.TitleKey);
     // holds named destination.
     this.name = null;
-    
     var dest = this.document.reader.queryDictionaryObject(
         this.item, PDFDocumentOutlineItem.DestKey);
+    var action = this.document.reader.queryDictionaryObject(
+        this.item, PDFDocumentOutlineItem.ActionKey);
     if (dest !== undefined) {
         this.name = dest.value;
+    } else if (action !== undefined) {
+        // only support "goto" named destination for now.
+        var actionName = this.document.reader.queryDictionaryObject(
+            action, PDFDocumentOutlineItem.ActionNameKey);
+        if (actionName.value == "GoTo") {
+            var dest = this.document.reader.queryDictionaryObject(
+                action, PDFDocumentOutlineItem.NamedDestinationKey);
+            if (dest !== undefined) {
+                this.name = dest;
+            }
+        }
     }
+}
+
+PDFDocumentOutlineItem.prototype.toJSON = function() {
+    return {
+        "title": this.title,
+        "destination": this.name
+    };
 }
     
 function PDFDocumentOutline(document, outline, level) {
@@ -620,17 +652,15 @@ PDFDocumentOutline.prototype.read = function() {
     this.count = Math.abs(
         this.document.reader.queryDictionaryObject(
             this.outline, PDFDocumentOutline.CountKey));
-    console.log(this.indent + "outline count: " + this.count);
+    //console.log(this.indent + "outline count: " + this.count);
 
     var current = this.document.reader.queryDictionaryObject(this.outline, "First");
     for (var index = 0; index < this.count; index++) {
-        var currentItem = new PDFDocumentOutlineItem(this.document, current);
-        this.children.push(currentItem);
-        
+        var currentItem = new PDFDocumentOutlineItem(this.document, current);        
         currentItem.read();
         
         if (currentItem.name != null) {
-            console.log(this.indent + currentItem.title + " (" + currentItem.name + ")");
+            ; //console.log(this.indent + currentItem.title + " (" + currentItem.name + ")");
         }
         
         // check if it has any children.
@@ -639,13 +669,39 @@ PDFDocumentOutline.prototype.read = function() {
         if (childCount !== undefined && (Math.abs(childCount) > 0)) {
             var childOutline = new PDFDocumentOutline(
                 this.document, current, this.level + 1);
+            childOutline.items.push(currentItem);
             this.children.push(childOutline);
 
             childOutline.read();            
+        } else {
+            // Just a leaf.
+            this.children.push(currentItem);
         }
         
         current = this.document.reader.queryDictionaryObject(current, "Next");
+        if (current === undefined) {
+            break;
+        }
     }
+}
+
+PDFDocumentOutline.prototype.toJSON = function() {
+    var itemsJSON = [];
+    for (var itemIndex = 0; itemIndex < this.items.length; itemIndex++) {
+        var item = this.items[itemIndex];
+        itemsJSON.push(item.toJSON());
+    }
+
+    var childrenJSON = [];
+    for (var childIndex = 0; childIndex < this.children.length; childIndex++) {
+        var child = this.children[childIndex];
+        childrenJSON.push(child.toJSON());
+    }
+    
+    return {
+        "items": itemsJSON,
+        "children": childrenJSON
+    };
 }
 
 function PDFDocumentCatalog(document) {
@@ -658,11 +714,12 @@ function PDFDocumentCatalog(document) {
     var outlines = this.document.reader.queryDictionaryObject(
         this.root, PDFDocumentOutline.OutlinesKey);    
     if (outlines !== undefined) {
-        //this.outline = new $tw.PDFDocumentOutline(this.reader, outlines, 0);
-        console.log("document does have outline!");
+        this.outline = new PDFDocumentOutline(this.document, outlines, 0);
+        //console.log("document does have outline!");
     }
     else {
-        console.log("document has no outline!");
+        //console.log("document has no outline!");
+        ;
     }
 
     this.hasOutline = this.outline != null;
@@ -729,7 +786,7 @@ PDFDocumentMetadata.prototype.read = function() {
         this.modified = this.modified.value;
     }
     
-    console.log("author: " + this.author + "\n" + "keywords: " + this.keywords + "\n" + "subject: " + this.subject + "\n" + "title: " + this.title);
+    //console.log("author: " + this.author + "\n" + "keywords: " + this.keywords + "\n" + "subject: " + this.subject + "\n" + "title: " + this.title);
 }
 
 function PDFExternalObject(document, root) {
@@ -748,12 +805,12 @@ PDFExternalObject.prototype.read = function() {
     // console.log("found some XObject names:");
     this.images = {};
     this.embedded = {};
-    console.log("PDFExternalObject.read()");
+    //console.log("PDFExternalObject.read()");
 
     for (var nameIndex = 0; nameIndex < this.names.length; nameIndex++) {        
         var name = this.names[nameIndex];
         if (this.document.debug) {
-            console.log("xobject name: " + name);
+            ;//console.log("xobject name: " + name);
         }
         
         // ask about it.
@@ -761,7 +818,7 @@ PDFExternalObject.prototype.read = function() {
         var objectMetadata = object.getDictionary().toJSObject();
         if (objectMetadata.Subtype.value == PDFExternalObject.ImageSubtype) {
             if (this.document.debug) {
-                console.log("found image subtype");
+                ;//console.log("found image subtype");
             }
             
             // Ignore Flate for now.
@@ -776,7 +833,7 @@ PDFExternalObject.prototype.read = function() {
         }
         else if (objectMetadata.Subtype.value == PDFExternalObject.FormSubtype) {
             if (this.document.debug) {
-                console.log("found form subtype: " + objectMetadata.Type);
+                ;//console.log("found form subtype: " + objectMetadata.Type);
             }
             
             // pull it out the hard way.
@@ -791,7 +848,7 @@ PDFExternalObject.prototype.read = function() {
             
             if (objectMetadata.Type.value == "XObject") {
                 if (this.document.debug) {
-                    console.log("form has embedded xobject");
+                    //console.log("form has embedded xobject");
                 }
                 
                 var indirect = this.root.queryObject(name);
@@ -806,6 +863,8 @@ PDFExternalObject.prototype.read = function() {
 
                 this.embedded[name] = form;
 
+                //console.log(object.getDictionary().toJSObject());
+
                 // expose the individual objects too: TODO. harder than it appears.
                 var resourceObject = this.document.reader.queryDictionaryObject(
                     object.getDictionary(),
@@ -817,7 +876,7 @@ PDFExternalObject.prototype.read = function() {
 
                     if (embeddedResources.xobject != null) {
                         if (this.document.debug) {
-                            console.log("embedded xobject has resources");
+                            //console.log("embedded xobject has resources");
                         }                    
                         
                         embeddedResources.read();
@@ -898,6 +957,18 @@ function PDFPageParser(document, index, input) {
 PDFPageParser.prototype.tokenizeFigures = function() {
     // search through the stream to references to graphics.
     var tokens = this.tokenizer.tokenize();
+
+    var figureNames = [];
+    for (var tokenIndex = 0; tokenIndex < tokens.length; tokenIndex++) {
+        var token = tokens[tokenIndex];
+        if (token.op == PDFTokenizer.OP_INVOKE_XOBJECT) {
+            figureNames.push(token.name);
+        }
+    }
+
+    return figureNames.filter(function(elem, pos) {
+        return figureNames.indexOf(elem) == pos;
+    })
 }
     
 function PDFPage(document, index, metadata, input) {
@@ -947,17 +1018,13 @@ function PDFDocument(path, debug) {
         var pageMetadata = this.reader.parsePageDictionary(pageNumber);
         var pageInput = this.reader.parsePage(pageNumber);
         var page = new PDFPage(this, pageNumber, pageMetadata, pageInput);
-
-        if (pageNumber == 0) {
-            page.parser.tokenizeFigures();
-        }
         
         this.pages.push(page);
     }
 }
 
 PDFDocument.prototype.close = function() {
-    this.reader.end();
+    //this.reader.end();
 }
 
 PDFDocument.prototype.saveAllImages = function(basePath) {

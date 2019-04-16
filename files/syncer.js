@@ -10,7 +10,7 @@ module-type: library
 /*global $tw: false */
 "use strict";
 
-var REBUILD = true;
+var REBUILD = false;
 var DEBUG = true;
     
 var PDF_FIELD_NAME = "pdf";    
@@ -21,11 +21,15 @@ var HIDDEN_TITLE_PREFIX = "$:/pdf/";
 var fs = null;
 var path = null;    
 var hummuspdf = null;
-
+var pdfapi;
+var Jimp = null;
+    
 if ($tw.node) {
     fs = require("fs");
     path = require("path");
     hummuspdf = require("$:/plugins/jlazarow/pdfserve/hummus-pdf.js");
+    pdfapi = require("$:/plugins/jlazarow/pdfserve/pdfapi.js");
+    Jimp = require("jimp");
 }
 
 function PDFSyncer(wiki, debug) {
@@ -47,13 +51,16 @@ PDFSyncer.prototype.syncTiddlers = function() {
     // find those Tiddlers with a "pdf" associated.
     var matchingTitles = this.wiki.filterTiddlers(FILTER_WITH_PDF);
     console.log("found " + matchingTitles.length + " tiddlers with associated PDFs");
-    
+
+    var syncPromises = [];
     for (var matchingIndex = 0; matchingIndex < matchingTitles.length; matchingIndex++) {
         var matchingTitle = matchingTitles[matchingIndex];
         var matchingTiddler = this.wiki.getTiddler(matchingTitle);
 
-        this.syncTiddler(matchingTiddler);
+        syncPromises.push(this.syncTiddler(matchingTiddler));
     }
+
+    return Promise.all(syncPromises);
 }
 
     // var ext = path.extname(filepath),
@@ -79,14 +86,36 @@ PDFSyncer.prototype.syncTiddlers = function() {
     //     "text": $tw.generateDocumentText(filepath, document),
     // };
 
+PDFSyncer.MAX_THUMBNAIL_HEIGHT = 128;
+
 PDFSyncer.prototype.createMetadata = function(document, title) {
-    var data = {
+    // "true" metadata, store in the main tiddler.
+    var metadata = {
         "title": document.metadata.title || "",
         "author": document.metadata.author || "",
         "subject": document.metadata.subject || "",
         "keywords": document.metadata.keywords || "",
+        "pages": document.numberPages
     }
 
+    var metadataTiddlers = [];
+    // Add a tiddler at $:/pdf/blah.pdf/outline.
+    if (document.catalog.hasOutline) {
+        var outlineData = document.catalog.outline.toJSON();
+        var outlineTiddler = {
+            "title": title + "/" + "outline",
+            "type": "application/json",
+            "tags": [title],
+            "text": JSON.stringify(outlineData, null, 2),
+            "retrieved": Date.now()
+        }
+
+        metadataTiddlers.push(outlineTiddler);
+    } else {
+        console.log("no outline!");
+    }
+
+    var allPromises = [];
     var pagesData = [];
     for (var pageIndex = 0; pageIndex < document.numberPages; pageIndex++) {
         var page = document.pages[pageIndex];
@@ -94,31 +123,101 @@ PDFSyncer.prototype.createMetadata = function(document, title) {
             page.read();
         }
 
-        var xobjectData = {};
+        var objectData = {};
         if (page.resources.xobject != null) {
             var xobject = page.resources.xobject;
-            xobjectData["images"]  = Object.keys(xobject.images);
-            xobjectData["forms"] = Object.keys(xobject.embedded);
+            objectData["images"]  = Object.keys(xobject.images);
+            objectData["forms"] = Object.keys(xobject.embedded);
         }
 
-        pagesData.push({
+        // also include what names are actually referenced on the page.
+        var referencedNames = page.parser.tokenizeFigures();
+        objectData["referenced"] = referencedNames;
+
+        // this will be really exciting.
+        console.log("generating thumbnails for: ");
+        console.log(referencedNames);
+        var pagePromises = [];
+        for (var referencedNameIndex = 0; referencedNameIndex < referencedNames.length; referencedNameIndex++) {
+            let referencedName = referencedNames[referencedNameIndex];
+
+            // try to read this image and generate a thumbnail.
+            pagePromises.push(pdfapi.PDF.getResource(document, pageIndex, referencedName).then(function(data) {
+                // call Jimp.
+                return Jimp.read(data).then(function(image) {
+                    return new Promise((resolve, reject) => {
+                        let currentHeight = image.bitmap.height;
+                        var resizedImage = image;
+                        
+                        if (currentHeight > PDFSyncer.MAX_THUMBNAIL_HEIGHT) {
+                            resizedImage = resizedImage.resize(PDFSyncer.MAX_THUMBNAIL_HEIGHT, Jimp.AUTO);
+                        }
+                        else {
+                            ; // already pretty small, ignore.
+                        }
+                        
+                        resizedImage.getBase64(Jimp.MIME_PNG, (err, src)  => {
+                            resolve({
+                                "key": referencedName,
+                                "value": src
+                            });
+                        });
+                    });
+                }).catch(function(err) {
+                    console.log("thumbnail error: " + referencedName);
+                    console.log(err);
+                });
+            }));
+        }
+
+        let pageData = {
             "index": pageIndex,
-            "xobject": xobjectData
-        })
+            "object": objectData,
+        }        
+
+        metadataTiddlers.push({
+            "title": title + "/" + "page" + "/" + pageIndex,
+            "type": "application/json",
+            "tags": [title],
+            "text": JSON.stringify(pageData, null, 2),
+            "retrieved": Date.now()            
+        });
+
+        allPromises.push(Promise.all(pagePromises));
     }
-
-    data["pages"] = pagesData;
-
+        
     // turning off tags, they cause a drop in TW performance.
-    return {
-        "title": title,
-        "type": "application/json",
-        "text": JSON.stringify(data, null, 2),
-        "retrieved": Date.now()
-    };
+    return Promise.all(allPromises).then(function(thumbnailsPerPage) {
+        for (let pageIndex = 0; pageIndex < document.numberPages; pageIndex++) {
+            let thumbnails = thumbnailsPerPage[pageIndex];
+            let thumbnailData = {};
+            for (let thumbnailIndex = 0; thumbnailIndex < thumbnails.length; thumbnailIndex++) {
+                let thumbnail = thumbnails[thumbnailIndex];
+                thumbnailData[thumbnail.key] = thumbnail.value;
+            }
+            
+            // add the tiddler.
+            metadataTiddlers.push({
+                "title": title + "/" + "page" + "/" + pageIndex + "/" + "thumbnails",
+                "type": "application/json",
+                "tags": [title + "/" + "page" + "/" + pageIndex],
+                "text": JSON.stringify(thumbnailData, null, 2),
+                "retrieved": Date.now()            
+            });
+        }
+
+        metadataTiddlers.splice(0, 0, {
+            "title": title,
+            "type": "application/json",
+            "text": JSON.stringify(metadata, null, 2),
+            "retrieved": Date.now()
+        });
+
+        return metadataTiddlers;
+    });
 }
     
-PDFSyncer.prototype.addMetadataTiddler = function(document) {
+PDFSyncer.prototype.addMetadataTiddler = function(name) {
     var filepath = path.resolve(this.root, name);
     if (this.debug) {
         console.log("adding metadata tiddler for " + name);
@@ -127,12 +226,19 @@ PDFSyncer.prototype.addMetadataTiddler = function(document) {
     var document = new hummuspdf.PDFDocument(filepath, this.debug);
     
     var metadataTitle = HIDDEN_TITLE_PREFIX + name;
-    var dataTiddler = new $tw.Tiddler(this.createMetadata(document, metadataTitle));
-    $tw.wiki.addTiddler(dataTiddler);
+    var metadataTiddlers = [];
+    this.createMetadata(document, metadataTitle).then(function(tiddlers) {
+        for (let tiddlerIndex = 0; tiddlerIndex < tiddlers.length; tiddlerIndex++) {
+            let tiddlerData = tiddlers[tiddlerIndex];
+            let newTiddler = new $tw.Tiddler(tiddlerData);
+            $tw.wiki.addTiddler(newTiddler);
 
-    document.close();
-    
-    return dataTiddler;
+            metadataTiddlers.push(newTiddler);
+        }
+
+        document.close();
+        return metadataTiddlers;
+    });
 }
 
 PDFSyncer.prototype.syncTiddler = function(tiddler) {
@@ -146,12 +252,14 @@ PDFSyncer.prototype.syncTiddler = function(tiddler) {
     var metadataTitle = HIDDEN_TITLE_PREFIX + pdfName;
     var dataTiddler = $tw.wiki.getTiddler(metadataTitle);
     
-    if (!dataTiddler) {
+    if (!dataTiddler || REBUILD) {
         console.log("failed to find " + metadataTitle);
-        dataTiddler = this.addMetadataTiddler(pdfName);
+        //if (pdfName == "1611.08974.pdf") {
+        return this.addMetadataTiddler(pdfName);
+        //}
     }
 
-    return dataTiddler;
+    return Promise.resolve(dataTiddler);
 }
 
 exports.PDFSyncer = PDFSyncer;
