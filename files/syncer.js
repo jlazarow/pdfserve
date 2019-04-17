@@ -251,7 +251,12 @@ PDFSyncer.prototype.syncTiddler = function(tiddler) {
     // assume not for now.
     var metadataTitle = HIDDEN_TITLE_PREFIX + pdfName;
     var dataTiddler = $tw.wiki.getTiddler(metadataTitle);
-    
+
+    if (!$tw.node) {
+        return Promise.resolve(dataTiddler);
+    }
+
+    // only can do this on the server.
     if (!dataTiddler || REBUILD) {
         console.log("failed to find " + metadataTitle);
         //if (pdfName == "1611.08974.pdf") {

@@ -28,8 +28,8 @@ function PDF(tiddler, document) {
     this.tiddler = tiddler;
     this.document = document || null;
 
-    this.data = $tw.wiki.getTiddlerAsJson(this.tiddler.title);
-    console.log(this.data);
+    console.log(this.tiddler.fields.text);
+    this.metadata = JSON.parse(this.tiddler.fields.text);
 }
 
 PDF.getResource = function(document, pageIndex, resourceName) {
@@ -85,9 +85,22 @@ PDF.getResource = function(document, pageIndex, resourceName) {
     console.log("failed to find anything: " + resourceName);
 
     return Promise.resolve(null);
-}    
+}
+
+PDF.prototype.getThumbnails = function(pageIndex) {
+    // look for certain tiddlers.
+    var pageThumbnailsTitle = this.tiddler.fields.title + "/" + "page" + "/" + pageIndex + "/" + "thumbnails";
+    var pageThumbnailTiddler = $tw.wiki.getTiddler(pageThumbnailsTitle);
+
+    if (!pageThumbnailTiddler) {
+        return {};
+    }
+
+    return JSON.parse(pageThumbnailTiddler.fields.text);
+}
+    
 // returns a promise after attempting to write the requested resource
-// to the stream "output".    
+// to the stream "output". Requires Node.js.
 PDF.prototype.writeResource = function(pageIndex, resourceName, output, beforeWrite) {
     if (pageIndex < 0 || pageIndex >= this.document.pages.length) {
         console.log("bad page index " + pageIndex);

@@ -11,8 +11,7 @@
 /*global $tw: false */
 "use strict";
 
-exports.name = "load-pdfserve";    
-exports.platforms = ["node"];
+exports.name = "load-pdfserve";
 exports.synchronous = true;    
 
 var DEBUG = true;

@@ -28,6 +28,7 @@ function PDFStore(wiki, debug) {
     this.debug = debug;
     
     this.pdfs = {};
+    this.open = {};
     this.syncer = new PDFSyncer(this.wiki, this.debug);
 }
 
@@ -38,8 +39,8 @@ PDFStore.prototype.getTiddler = function(pdfName) {
 
 PDFStore.prototype.getPDF = function(name) {
     console.log("PDFStore retrieving " + name);
-    if (name in this.pdfs) {
-        return this.pdfs[name];
+    if (name in this.open) {
+        return this.open[name];
     }
 
     var dataTiddler = this.getTiddler(name);
@@ -55,13 +56,24 @@ PDFStore.prototype.getPDF = function(name) {
     }
 
     var result = new API.PDF(dataTiddler, document);
-    this.pdfs[name] = result;
+    this.open[name] = result;
 
     return result;
 }
 
 PDFStore.prototype.sync = function() {
-    return this.syncer.syncTiddlers();
+    return this.syncer.syncTiddlers().then(function(dataTiddlers) {
+        console.log("sync completed: " + dataTiddlers.length + " PDFs");
+
+        for (let tiddlerIndex = 0; tiddlerIndex < dataTiddlers.length; tiddlerIndex++) {
+            let tiddlerAtIndex = dataTiddlers[tiddlerIndex];
+            if (Array.isArray(tiddlerAtIndex)) {
+                tiddlerAtIndex = tiddletAtIndex[0];
+            }
+
+            this.pdfs[tiddlerAtIndex.fields.title] = tiddlerAtIndex;
+        }
+    }.bind(this));
 }
     
 exports.PDFStore = PDFStore;

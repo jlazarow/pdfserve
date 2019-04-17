@@ -42,6 +42,13 @@
 				  "title": "$:/plugins/jlazarow/pdfserve/tokenizer.js",
 				  "module-type": "library"
 			}
-		}
+		},{
+                        "file": "pdf-graphic-picker.js",
+                        "fields": {
+                                  "type": "application/javascript",
+                                  "title": "$:/plugins/jlazarow/pdfserve/pdf-graphic-picker.js",
+                                  "module-type": "widget"
+                        }
+                }
 	        ]
 }
