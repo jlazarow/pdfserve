@@ -86,7 +86,7 @@ PDFSyncer.prototype.syncTiddlers = function() {
     //     "text": $tw.generateDocumentText(filepath, document),
     // };
 
-PDFSyncer.MAX_THUMBNAIL_HEIGHT = 128;
+PDFSyncer.MAX_THUMBNAIL_HEIGHT = 256;
 
 PDFSyncer.prototype.createMetadata = function(document, title) {
     // "true" metadata, store in the main tiddler.
@@ -155,8 +155,11 @@ PDFSyncer.prototype.createMetadata = function(document, title) {
                         else {
                             ; // already pretty small, ignore.
                         }
+
+                        // lower the quality
+                        var compressedImage = resizedImage.quality(60);
                         
-                        resizedImage.getBase64(Jimp.MIME_PNG, (err, src)  => {
+                        resizedImage.getBase64(Jimp.MIME_JPEG, (err, src)  => {
                             resolve({
                                 "key": referencedName,
                                 "value": src

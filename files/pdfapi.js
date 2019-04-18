@@ -327,6 +327,8 @@ function convertPDFToPNG(bytes, pageNumber) {
 }
     
 exports.PDF = PDF;
+exports.PDFOutline = PDFOutline;
+exports.PDFOutlineItem = PDFOutlineItem;    
 exports.convertPDFToPNG = convertPDFToPNG;
 
 })();
