@@ -18,18 +18,82 @@ if ($tw.node) {
     fs = require('fs');
     png = require("pngjs");
 }
-    
-// All PDFs should be backed by a tiddler. If we're on the server
-// having a document backed by Hummus is possible. If we're on the
-// client, theoretically this could be PDFJS backed, but that is
-// unlikely to be too useful.
 
+var HIDDEN_TITLE_PREFIX = "$:/pdf/";            
+
+function PDFOutlineItem(title, destination, level, items) {
+    this.title = title;
+    this.destination = destination;
+    this.level = level;
+    this.items = items;
+}
+
+PDFOutlineItem.parse = function(item, level) {
+    var childItems = [];
+    if ("children" in item) {
+        for (var childIndex = 0; childIndex < item.children.length; childIndex++) {
+            let childItem = PDFOutlineItem.parse(item.children[childIndex], level + 1);
+            childItems.push(childItem);
+        }
+    }
+
+    if ("items" in item) {
+        item = item.items[0];
+    }
+
+    var title = item.title.value;
+    var destination = item.destination.value;
+
+    return new PDFOutlineItem(title, destination, level, childItems);
+}
+
+PDFOutlineItem.prototype.getFlattened = function() {
+    var flattened = [ this ];
+
+    for (var itemIndex = 0; itemIndex < this.items.length; itemIndex++) {
+        var item = this.items[itemIndex];
+
+        flattened = flattened.concat(item.getFlattened());
+    }
+
+    return flattened;
+}
+    
+function PDFOutline(rootItems) {
+    console.log(rootItems);
+    // recursively read the top level items.
+    this.items = [];
+
+    for (var rootItemIndex = 0; rootItemIndex < rootItems.length; rootItemIndex++) {
+        var item = PDFOutlineItem.parse(rootItems[rootItemIndex], 0);
+        this.items.push(item);
+    }
+}
+
+PDFOutline.prototype.getFlattened = function() {
+    var flattened = [];
+
+    for (var itemIndex = 0; itemIndex < this.items.length; itemIndex++) {
+        var item = this.items[itemIndex];
+        
+        flattened = flattened.concat(item.getFlattened());
+    }
+
+    return flattened;
+}        
+
+var OUTLINE_NAME = "outline";
+    
 function PDF(tiddler, document) {
     this.tiddler = tiddler;
+    this.name = this.tiddler.fields.title.substring(HIDDEN_TITLE_PREFIX.length);
     this.document = document || null;
 
     console.log(this.tiddler.fields.text);
     this.metadata = JSON.parse(this.tiddler.fields.text);
+
+    // check if an outline exists.
+    this.outline = this.readOutline();
 }
 
 PDF.getResource = function(document, pageIndex, resourceName) {
@@ -87,6 +151,18 @@ PDF.getResource = function(document, pageIndex, resourceName) {
     return Promise.resolve(null);
 }
 
+PDF.prototype.readOutline = function() {
+    var outlineTitle = this.tiddler.fields.title + "/" + OUTLINE_NAME;
+    var outlineTiddler = $tw.wiki.getTiddler(outlineTitle);
+
+    if (outlineTiddler == undefined) {
+        return null;
+    }
+
+    var outlineData = JSON.parse(outlineTiddler.fields.text);
+    return new PDFOutline(outlineData["children"]);
+}
+    
 PDF.prototype.getThumbnails = function(pageIndex) {
     // look for certain tiddlers.
     var pageThumbnailsTitle = this.tiddler.fields.title + "/" + "page" + "/" + pageIndex + "/" + "thumbnails";

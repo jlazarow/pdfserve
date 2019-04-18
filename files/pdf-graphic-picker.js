@@ -108,7 +108,6 @@ PDFGraphicPickerWidget.prototype.render = function(parent, nextSibling) {
 	        });
 
                 // now we want to close the dropdown.
-                console.log(this.getVariable("dropdown-state"));
 	        this.dispatchEvent({
 		    type: "delete-tiddler",
                     param: null,

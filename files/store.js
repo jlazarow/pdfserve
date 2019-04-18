@@ -33,9 +33,22 @@ function PDFStore(wiki, debug) {
 }
 
 PDFStore.prototype.getTiddler = function(pdfName) {
-    var dataTitle = HIDDEN_TITLE_PREFIX + pdfName;
-    return this.wiki.getTiddler(dataTitle);
-}    
+    if (!pdfName.startsWith(HIDDEN_TITLE_PREFIX)) {
+        pdfName = HIDDEN_TITLE_PREFIX + pdfName;
+    }
+
+    return this.wiki.getTiddler(pdfName);
+}
+
+PDFStore.prototype.getReferencingTiddler = function(tiddler) {
+    var pdfName = tiddler.fields.title.substring(HIDDEN_TITLE_PREFIX.length);
+    var referencingTiddlers = this.wiki.filterTiddlers("[field:pdf[" + pdfName + "]]");
+    if (referencingTiddlers.length == 0) {
+        return null;
+    }
+
+    return this.wiki.getTiddler(referencingTiddlers[0]);
+}
 
 PDFStore.prototype.getPDF = function(name) {
     console.log("PDFStore retrieving " + name);
@@ -65,15 +78,22 @@ PDFStore.prototype.sync = function() {
     return this.syncer.syncTiddlers().then(function(dataTiddlers) {
         console.log("sync completed: " + dataTiddlers.length + " PDFs");
 
+        var addedTiddlers = [];
         for (let tiddlerIndex = 0; tiddlerIndex < dataTiddlers.length; tiddlerIndex++) {
             let tiddlerAtIndex = dataTiddlers[tiddlerIndex];
             if (Array.isArray(tiddlerAtIndex)) {
-                tiddlerAtIndex = tiddletAtIndex[0];
+                tiddlerAtIndex = tiddlerAtIndex[0];
             }
 
             this.pdfs[tiddlerAtIndex.fields.title] = tiddlerAtIndex;
+            addedTiddlers.push(tiddlerAtIndex);
         }
-    }.bind(this));
+
+        return addedTiddlers;
+    }.bind(this)).catch(function(err) {
+        console.log("sync failed:");
+        console.log(err);
+    });
 }
     
 exports.PDFStore = PDFStore;
