@@ -63,29 +63,6 @@ PDFSyncer.prototype.syncTiddlers = function() {
     return Promise.all(syncPromises);
 }
 
-    // var ext = path.extname(filepath),
-    //     extensionInfo = $tw.utils.getFileExtensionInfo(ext),
-    //     type = extensionInfo ? extensionInfo.type : null,
-    //     typeInfo = type ? $tw.config.contentTypeInfo[type] : null;
-
-    // var caption = document.metadata.title;
-    // if (caption != null && caption !== undefined) {
-    //     caption = caption + " (PDF)"; // just to be safe.
-    // }
-    
-    // var viewTiddler = {
-    //     "title": HIDDEN_title,
-    //     "caption": caption,
-    //     "author": document.metadata.author || "",
-    //     "subject": document.metadata.subject || "",
-    //     "tags": "pdf " + (document.metadata.keywords || ""),
-    //     "created": $tw.fixupPDFDateStrings(document.metadata.created),
-    //     "modified": $tw.fixupPDFDateStrings(document.metadata.modified),
-    //     "filename": path.basename(filepath),
-    //     "type": "application/pdf",
-    //     "text": $tw.generateDocumentText(filepath, document),
-    // };
-
 PDFSyncer.MAX_THUMBNAIL_HEIGHT = 256;
 
 PDFSyncer.prototype.createMetadata = function(document, title) {
@@ -230,7 +207,7 @@ PDFSyncer.prototype.addMetadataTiddler = function(name) {
     
     var metadataTitle = HIDDEN_TITLE_PREFIX + name;
     var metadataTiddlers = [];
-    this.createMetadata(document, metadataTitle).then(function(tiddlers) {
+    return this.createMetadata(document, metadataTitle).then(function(tiddlers) {
         for (let tiddlerIndex = 0; tiddlerIndex < tiddlers.length; tiddlerIndex++) {
             let tiddlerData = tiddlers[tiddlerIndex];
             let newTiddler = new $tw.Tiddler(tiddlerData);
@@ -262,7 +239,7 @@ PDFSyncer.prototype.syncTiddler = function(tiddler) {
     // only can do this on the server.
     if (!dataTiddler || REBUILD) {
         console.log("failed to find " + metadataTitle);
-        //if (pdfName == "1611.08974.pdf") {
+        //if (pdfName == "Tulsiani_Factoring_Shape_Pose_CVPR_2018_paper.pdf") {
         return this.addMetadataTiddler(pdfName);
         //}
     }

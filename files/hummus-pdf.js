@@ -195,8 +195,8 @@ PDFForm.prototype.read = function() {
     result.writePage(page).end();
     stream.end();
 
-    // I believe there is some sort of timing issue here.
-
+    // I believe there is some sort of timing issue here. I believe I'm
+    // abusing the stream.
     this.data = stream.toBuffer();
     //console.log(this.data);
 

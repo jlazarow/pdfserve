@@ -9,7 +9,7 @@
 /*global $tw: false */
 "use strict";
 
-var pdfjs, Canvas, assert, hummuspdf, fs, png;
+var pdfjs, Canvas, assert, hummuspdf, fs, png, streams;
 if ($tw.node) {
     pdfjs = require("pdfjs-dist");
     Canvas = require("canvas");
@@ -17,6 +17,7 @@ if ($tw.node) {
     hummuspdf = require("$:/plugins/jlazarow/pdfserve/hummus-pdf.js");
     fs = require('fs');
     png = require("pngjs");
+    streams = require("memory-streams");
 }
 
 var HIDDEN_TITLE_PREFIX = "$:/pdf/";            
@@ -124,11 +125,22 @@ PDF.getResource = function(document, pageIndex, resourceName) {
         }
 
         var imageData = foundImage.read();
-        //stream.end();
-        
-        //console.log("getting image:");
-        //console.log(foundImage);
-        return Promise.resolve(png.PNG.sync.write(imageData));
+        var stream = new streams.WritableStream();
+        imageData.pack().pipe(stream);
+
+        return new Promise(
+            (resolve, reject) => {
+                stream.on('error', function(err) {
+                    reject(err);
+                })
+
+                stream.on('finish', function() {
+                    console.log("writes finished");
+                    let buffer = stream.toBuffer();
+                    console.log(buffer);
+                    resolve(buffer);
+                });
+            });
     }
     else if (resourceName in foundEmbeds) {
         console.log("reading embed resource");
@@ -214,7 +226,6 @@ PDF.prototype.writeResource = function(pageIndex, resourceName, output, beforeWr
 
         // note: pipe calls end().
         imageData.pack().pipe(output);
-
         return Promise.resolve(true);
     }
     else if (resourceName in foundEmbeds) {
