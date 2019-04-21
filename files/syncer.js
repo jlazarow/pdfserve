@@ -44,6 +44,20 @@ function PDFSyncer(wiki, debug) {
         }
     }
 }
+
+PDFSyncer.prototype.startWatching = function() {
+    if (!$tw.node) {
+        return;
+    }
+    
+    fs.watch(this.root, function(eventType, filename) {
+        if (eventType == "rename") {
+            if (filename.endsWith(".pdf")) {
+                console.log("found new PDF: " + filename);
+            }
+        }
+    });
+}
     
 PDFSyncer.prototype.syncTiddlers = function() {
     console.log("PDFSyncer: starting synchronization of store");

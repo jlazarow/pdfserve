@@ -49,11 +49,22 @@ exports.startup = function() {
         console.log("sync returned " + papers.length + " papers");
 
         for (var paperIndex = 0; paperIndex < papers.length; paperIndex++) {
-            var paper = papers[paperIndex];
-            var referencingTiddler = referencingTiddlers[paperIndex];
+            let paper = papers[paperIndex];
+            console.log(paper);
+            let referencingTiddler = referencingTiddlers[paperIndex];
+            if (!referencingTiddler) {
+                console.log("failed to find referencing tiddler for paper " + paper.title);
+            }
 
-            $tw.papers[referencingTiddler.fields.title] = paper;
+            $tw.papers.addPaper(paper, referencingTiddler.fields.title);
         }
+
+        // Also sync all under $:/papers.
+        console.log("saving paper database");
+        $tw.papers.save();
+
+        console.log("starting to watch for PDFs");
+        $tw.pdfs.syncer.startWatching();
     });
 }
     
