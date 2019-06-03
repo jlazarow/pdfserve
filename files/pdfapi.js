@@ -61,7 +61,6 @@ PDFOutlineItem.prototype.getFlattened = function() {
 }
     
 function PDFOutline(rootItems) {
-    console.log(rootItems);
     // recursively read the top level items.
     this.items = [];
 
@@ -90,7 +89,6 @@ function PDF(tiddler, document) {
     this.name = this.tiddler.fields.title.substring(HIDDEN_TITLE_PREFIX.length);
     this.document = document || null;
 
-    console.log(this.tiddler.fields.text);
     this.metadata = JSON.parse(this.tiddler.fields.text);
 
     // check if an outline exists.
@@ -105,7 +103,6 @@ PDF.getResource = function(document, pageIndex, resourceName) {
         
     var page = document.pages[pageIndex];
     if (!page.hasRead) {
-        console.log("reading page at index: " + pageIndex);
         page.read();
     }
 
@@ -118,7 +115,6 @@ PDF.getResource = function(document, pageIndex, resourceName) {
     }
     
     if (resourceName in foundImages) {
-        console.log("reading image resource");
         var foundImage = foundImages[resourceName];
         while (!(foundImage instanceof hummuspdf.PDFImage)) {
             foundImage = foundImage[Object.keys(foundImage)[0]];
@@ -126,39 +122,42 @@ PDF.getResource = function(document, pageIndex, resourceName) {
 
         var imageData = foundImage.read();
         var stream = new streams.WritableStream();
-        imageData.pack().pipe(stream);
+        var packedImage = null;
+
+        try {
+            packedImage = imageData.pack();
+        }
+        catch (e) {
+            console.log("Failed to pack resource: " + resourceName);
+            //debugger;
+            
+            return Promise.resolve(null);
+        }
+
+        packedImage.pipe(stream);
 
         return new Promise(
             (resolve, reject) => {
                 stream.on('error', function(err) {
+                    console.log("Failed on image resource: " + resourceName);
                     reject(err);
                 })
 
                 stream.on('finish', function() {
-                    console.log("writes finished");
                     let buffer = stream.toBuffer();
-                    console.log(buffer);
                     resolve(buffer);
                 });
             });
     }
     else if (resourceName in foundEmbeds) {
-        console.log("reading embed resource");
         var foundEmbed = foundEmbeds[resourceName];
         var embeddedData = foundEmbed.read();
-
-        //console.log("embddded data");
-        //console.log(Buffer.from(embeddedData).toString());        
-
-        console.log("getting embed: " + resourceName);
 
         // convert to PNG.
         return convertPDFToPNG(embeddedData, 1).then(function(pngData) {
             return pngData;
         });
     }
-
-    console.log("failed to find anything: " + resourceName);
 
     return Promise.resolve(null);
 }
@@ -191,14 +190,12 @@ PDF.prototype.getThumbnails = function(pageIndex) {
 // to the stream "output". Requires Node.js.
 PDF.prototype.writeResource = function(pageIndex, resourceName, output, beforeWrite) {
     if (pageIndex < 0 || pageIndex >= this.document.pages.length) {
-        console.log("bad page index " + pageIndex);
         beforeWrite(false);
         output.end();
     }
         
     var page = this.document.pages[pageIndex];
     if (!page.hasRead) {
-        console.log("reading page at index: " + pageIndex);
         page.read();
     }
 
@@ -211,7 +208,6 @@ PDF.prototype.writeResource = function(pageIndex, resourceName, output, beforeWr
     }
     
     if (resourceName in foundImages) {
-        console.log("reading image resource");
         var foundImage = foundImages[resourceName];
         while (!(foundImage instanceof hummuspdf.PDFImage)) {
             foundImage = foundImage[Object.keys(foundImage)[0]];
@@ -229,7 +225,6 @@ PDF.prototype.writeResource = function(pageIndex, resourceName, output, beforeWr
         return Promise.resolve(true);
     }
     else if (resourceName in foundEmbeds) {
-        console.log("reading embed resource");
         var foundEmbed = foundEmbeds[resourceName];
         var embeddedData = foundEmbed.read();
         
@@ -251,7 +246,7 @@ PDF.prototype.writeResource = function(pageIndex, resourceName, output, beforeWr
     }
 
     // not good.
-    console.log("bad resource name: " + resourceName);
+    console.log("Bad resource name: " + resourceName);
     console.log("valid names are:");
     console.log("images:");
     console.log(Object.keys(foundImages));

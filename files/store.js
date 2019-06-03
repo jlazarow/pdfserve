@@ -66,6 +66,7 @@ PDFStore.prototype.getPDF = function(name) {
     if ($tw.node) {
         var filepath = path.resolve(this.syncer.root, name);
         document = new hummuspdf.PDFDocument(filepath, this.debug);
+        console.log("PDFStore opened PDF at " + filepath);
     }
 
     var result = new API.PDF(dataTiddler, document);

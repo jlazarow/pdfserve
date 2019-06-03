@@ -47,7 +47,6 @@ PDFGraphicPickerWidget.prototype.render = function(parent, nextSibling) {
 
     var targetTiddler = this.wiki.getTiddler(tiddlerName);
     if (!("pdf" in targetTiddler.fields)) {
-        
         outer.innerHTML = "No PDF associated";
         parent.insertBefore(outer, nextSibling);
         this.domNodes.push(outer);
@@ -57,6 +56,13 @@ PDFGraphicPickerWidget.prototype.render = function(parent, nextSibling) {
     // Ask the PDF store for this tiddler.
     var pdfName = targetTiddler.fields["pdf"];
     var pdf = $tw.pdfs.getPDF(pdfName);
+    if (pdf == null || pdf == undefined) {
+        // odd.
+        outer.innerHTML = "Failed to lookup PDF!";
+        parent.insertBefore(outer, nextSibling);
+        this.domNodes.push(outer);
+        return;
+    }
 
     var pageLabel = this.document.createElement("span");
     pageLabel.innerHTML = "Page: "; // todo: margin this.

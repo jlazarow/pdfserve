@@ -16,6 +16,7 @@ var path = require("path");
 var pdf = require("hummus");
 var png = require("pngjs");
 var zlib = require("zlib");
+var icc = require("icc");    
 var streams = require("memory-streams");
 var PDFTokenizer = require("$:/plugins/jlazarow/pdfserve/tokenizer.js").PDFTokenizer;
 
@@ -40,6 +41,58 @@ var PDFDestinationKindMapping = {
 function PDFDestination(document, page) {
 }
 
+// TODO: combine everything!.
+function ICCColorSpace(document, root) {
+    this.document = document;
+    this.root = root;
+    this.dictionary = this.root.getDictionary();
+
+    this.numberComponents = undefined;
+    this.length = undefined;
+    this.alternate = undefined;
+    this.data = null;
+}
+
+ICCColorSpace.prototype.read = function() {
+    this.numberComponents = this.document.reader.queryDictionaryObject(this.dictionary, "N").value;
+    this.length = this.document.reader.queryDictionaryObject(this.dictionary, "Length").value;
+
+    var dictionaryObject = this.dictionary.toJSObject();
+    if ("Alternate" in dictionaryObject) {
+        this.alternate = this.document.reader.queryDictionaryObject(this.dictionary, "Alternate");
+
+        // Be lazy and skip anything else if alternate was already given.
+        return;
+    }
+
+    // read the stream.
+    var stream = this.document.reader.startReadingFromStream(this.root);
+    this.data = stream.read(this.length);
+
+    // if this is compressed, this won't get decoded properly. check the size specified in the
+    // profile.
+    var actualLength = (256 ** 3) * this.data[0] + (256 ** 2) * this.data[1] + (256 ** 1) * this.data[2] + this.data[3];
+    console.log("actual length is " + actualLength);
+
+    var remainingBytes = actualLength - this.length;
+    if (remainingBytes > 0) {
+        var remainingData = stream.read(remainingBytes);
+        this.data = this.data.concat(remainingData);
+        this.length = actualLength;
+    }
+
+    // parse this at some point.
+    try {
+        this.profile = icc.parse(Buffer.from(this.data));
+    }
+    catch (err) {
+        debugger;
+    }
+    
+    console.log("ICC profile:");
+    console.log(this.profile);
+}
+
 function PDFColorSpace(document, root, kind, bitsPerComponent) {
     this.document = document;
     this.root = root;
@@ -47,16 +100,65 @@ function PDFColorSpace(document, root, kind, bitsPerComponent) {
     this.bitsPerComponent = bitsPerComponent;
 };
 
+// PDFColorSpace.create = function(document, root) {
+//     var color = null;
+//     if (colorValue.getType() != pdf.ePDFObjectArray) {
+//         console.log("PDFColorSpace.create: Unknown color space handler!");
+//         return null;
+//     }
+
+//     // Only handle ICCBased pointing to a stream for now.
+//     if (colorValue.getLength() != 2) {
+//         console.log("PDFColorSpace.create: Expected array of length 2!");
+//         return null;        
+//     }
+    
+//     var specialName = document.reader.queryArrayObject(root, 0).value;
+//     if (specialName == PDFColorSpace.ICCBasedColorSpace) {
+//         console.log("encountered ICC-based color");
+//         var stream = document.reader.queryArrayObject(root, 1);
+//         if (stream.getType() != pdf.ePDFObjectStream) {
+//         }
+        
+//         var  = new PDFICCBasedColorSpace(
+//                 this.document,
+//                 this.document.reader.queryArrayObject(colorValue, 1),
+//                 this.document.reader.queryDictionaryObject(this.attributes, PDFImage.BitsPerComponentKey).value);
+
+//             // "use ICC" flag?
+//             this.color = new PDFColorSpace(
+//                 this.document,
+//                 colorValue,
+//                 ignore.alternate,
+//                 this.document.reader.queryDictionaryObject(
+//                     this.attributes, PDFImage.BitsPerComponentKey).value);
+//         }
+//         else {
+//             console.log("probably don't read this image for now: " + specialName);
+//             //$tw.utils.error("unknown \"special\" color space value: " + specialName);
+//         }
+//     }
+//     else {
+//         console.log("Not ICC-based!");
+//         return null;
+//     }
+// }
+
 
 PDFColorSpace.DeviceGrayColorSpace = "DeviceGray";
 PDFColorSpace.DeviceRGBColorSpace = "DeviceRGB";
 PDFColorSpace.IndexedColorSpace = "Indexed";    
 PDFColorSpace.ICCBasedColorSpace = "ICCBased";
+PDFColorSpace.PatternColorSpace = "Pattern";
+PDFColorSpace.GrayColorSpace = "GRAY"; 
+PDFColorSpace.RGBColorSpace = "RGB";   
     
 PDFColorSpace.ColorSpaces = {
     [PDFColorSpace.DeviceGrayColorSpace]: 0,
     [PDFColorSpace.DeviceRGBColorSpace]: 1,
-    [PDFColorSpace.IndexedColorSpace]: 2
+    [PDFColorSpace.IndexedColorSpace]: 2,
+    [PDFColorSpace.RGBColorSpace]: 3,
+    [PDFColorSpace.GrayColorSpace]: 4,
 }
 
 PDFColorSpace.DeviceColorSpaces = [
@@ -66,18 +168,24 @@ PDFColorSpace.DeviceColorSpaces = [
 
 PDFColorSpace.ComponentsPerColorSpace =  {
     [PDFColorSpace.ColorSpaces[PDFColorSpace.DeviceGrayColorSpace]]: 1,
-    [PDFColorSpace.ColorSpaces[PDFColorSpace.DeviceRGBColorSpace]]: 3
+    [PDFColorSpace.ColorSpaces[PDFColorSpace.DeviceRGBColorSpace]]: 3,
+    [PDFColorSpace.ColorSpaces[PDFColorSpace.RGBColorSpace]]: 3,
+    [PDFColorSpace.ColorSpaces[PDFColorSpace.GrayColorSpace]]: 1
 }
 
 PDFColorSpace.PNGColorTypeMap = {
     [PDFColorSpace.ColorSpaces[PDFColorSpace.DeviceGrayColorSpace]]: 0,
-    [PDFColorSpace.ColorSpaces[PDFColorSpace.DeviceRGBColorSpace]]: 2
+    [PDFColorSpace.ColorSpaces[PDFColorSpace.DeviceRGBColorSpace]]: 2,
+    [PDFColorSpace.ColorSpaces[PDFColorSpace.GrayColorSpace]]: 0,
+    [PDFColorSpace.ColorSpaces[PDFColorSpace.RGBColorSpace]]: 2
 };
 
 // basically Adobe's "I upgraded your color space".
 PDFColorSpace.PNGColorTypeAlphaMap = {
     [PDFColorSpace.ColorSpaces[PDFColorSpace.DeviceGrayColorSpace]]: 4,
-    [PDFColorSpace.ColorSpaces[PDFColorSpace.DeviceRGBColorSpace]]: 6
+    [PDFColorSpace.ColorSpaces[PDFColorSpace.DeviceRGBColorSpace]]: 6,
+    [PDFColorSpace.ColorSpaces[PDFColorSpace.GrayColorSpace]]: 4,
+    [PDFColorSpace.ColorSpaces[PDFColorSpace.RGBColorSpace]]: 6
 };
 
 function PDFIndexedColorSpace(document, root, bitsPerComponent) {
@@ -96,17 +204,49 @@ PDFIndexedColorSpace.prototype.constructor = PDFIndexedColorSpace;
 
 PDFIndexedColorSpace.prototype.read = function() {
     var base = this.document.reader.queryArrayObject(this.root, 1);
-    if (PDFColorSpace.DeviceColorSpaces.indexOf(base.value) < 0) {
+    if (base.getType() == pdf.ePDFObjectArray) {
+        // all good fun.
+        var spaceName = this.document.reader.queryArrayObject(base, 0);
+        if (spaceName == PDFColorSpace.ICCBasedColorSpace) {
+            var space = new ICCColorSpace(
+                this.document,
+                this.document.reader.queryArrayObject(base, 1));
+            space.read();
+
+            // "use ICC" flag?
+            var kind = space.alternate;
+            if (kind == undefined) {
+                kind = space.profile.colorSpace;
+            }
+
+            if (kind == undefined) {
+                debugger;
+            }
+
+            this.base = new PDFColorSpace(
+                this.document,
+                space,
+                PDFColorSpace.ColorSpaces[kind],
+                this.bitsPerComponent);
+        }
+        else {
+            return;
+        }
+    }
+    else if (PDFColorSpace.DeviceColorSpaces.indexOf(base.value) < 0) {
         // HACK.
         return;
        //$tw.util.error("expected base color space to be DeviceN: " + base.value);
     }
 
-    this.base = new PDFColorSpace(
-        this.document.reader,
-        base,
-        PDFColorSpace.ColorSpaces[base.value],
-        this.bitsPerComponent);
+    if (this.base == undefined) {
+        this.base = new PDFColorSpace(
+            this.document.reader,
+            base,
+            PDFColorSpace.ColorSpaces[base.value],
+            this.bitsPerComponent);
+    }
+
     this.maxIndex = this.document.reader.queryArrayObject(this.root, 2).value;
 
     // read the table.
@@ -116,19 +256,26 @@ PDFIndexedColorSpace.prototype.read = function() {
     var possibleStream = this.document.reader.queryArrayObject(this.root, 3);
 
     // HACK: getting out of hand.
+    var data = null;
     if (possibleStream.getType() == pdf.ePDFObjectStream) {
         var stream = this.document.reader.startReadingFromStream(
             this.document.reader.queryArrayObject(this.root, 3));
-        var data = stream.read(numberBytes);
+        data = stream.read(numberBytes);
+    } else if (possibleStream.getType() == pdf.ePDFObjectHexString) {
+        data = Buffer.from(possibleStream.value, "utf8");
+    }
 
-        this.table = [];
-        for (var colorIndex = 0; colorIndex <= this.maxIndex; colorIndex++) {
-            var startByte = colorIndex * numberComponents;
-            var endByte = (colorIndex + 1) * numberComponents;
-            
-            var colorValue = data.slice(startByte, endByte);
-            this.table.push(colorValue);
-        }
+    if (data == null) {
+        return;
+    }
+
+    this.table = [];
+    for (var colorIndex = 0; colorIndex <= this.maxIndex; colorIndex++) {
+        var startByte = colorIndex * numberComponents;
+        var endByte = (colorIndex + 1) * numberComponents;
+        
+        var colorValue = data.slice(startByte, endByte);
+        this.table.push(colorValue);
     }
 }
 
@@ -182,7 +329,6 @@ PDFForm.prototype.read = function() {
     // maybe can optimize this to use existing stream - didn't seem obvious.
     var copy = result.createPDFCopyingContext(this.document.path);
     var destID = copy.copyObject(this.objectID);
-    console.log("placing XObject " + this.objectID + " into " + destID);
 
     // create a page with just enough room.
     var page = result.createPage(this.x, this.y, this.width, this.height);
@@ -198,7 +344,6 @@ PDFForm.prototype.read = function() {
     // I believe there is some sort of timing issue here. I believe I'm
     // abusing the stream.
     this.data = stream.toBuffer();
-    //console.log(this.data);
 
     // this is infuriating.
     //var temporaryPath = "/tmp/" + Math.random().toString() + ".pdf"
@@ -259,16 +404,21 @@ function PDFImage(document, parent, image) {
         }
         else if (specialName == PDFColorSpace.ICCBasedColorSpace) {
             //console.log("encountered ICC-based color");
-            var ignore = new PDFICCBasedColorSpace(
+            var space = new ICCColorSpace(
                 this.document,
-                this.document.reader.queryArrayObject(colorValue, 1),
-                this.document.reader.queryDictionaryObject(this.attributes, PDFImage.BitsPerComponentKey).value);
+                this.document.reader.queryArrayObject(colorValue, 1));
+            space.read();
 
             // "use ICC" flag?
+            var kind = space.alternate;
+            if (kind == undefined) {
+                kind = space.profile.colorSpace;
+            }
+            
             this.color = new PDFColorSpace(
                 this.document,
-                colorValue,
-                ignore.alternate,
+                space,
+                PDFColorSpace.ColorSpaces[kind],
                 this.document.reader.queryDictionaryObject(
                     this.attributes, PDFImage.BitsPerComponentKey).value);
         }
@@ -318,7 +468,7 @@ PDFImage.prototype.read = function() {
     var data = null;
     var colorType = null;
 
-    if (this.color instanceof PDFIndexedColorSpace) {
+    if (this.color instanceof PDFIndexedColorSpace && (this.color.base !== undefined)) {
         var numberComponents = PDFColorSpace.ComponentsPerColorSpace[this.color.base.kind];
         var indexedData = stream.read(this.width * this.height * numberComponents);
         colorType = PDFColorSpace.PNGColorTypeMap[this.color.base.kind];
@@ -334,6 +484,10 @@ PDFImage.prototype.read = function() {
         var numberComponents = PDFColorSpace.ComponentsPerColorSpace[this.color.kind];
         var expectedLength = this.width * this.height * numberComponents;
         data = stream.read(expectedLength);
+        if (data.length == 0) {
+            debugger;
+            console.log("PDFImage: attempted to read " + expectedLength + " bytes but came away with none");
+        }
 
         // I don't think hummus handles the PNG predictors properly.
         if (this.decodeParameters != null) {
@@ -358,8 +512,8 @@ PDFImage.prototype.read = function() {
                         var predictorValue = inflatedData[bufferRowStart];
                         // console.log(bufferRowStart);
                         // console.log("predictor for row " + rowIndex + ": " + predictorValue);
-                        if (predictorValue == 3 || predictorValue > 4) {
-                            console.log("quitting, found something not none, sub, or up");
+                        if (predictorValue > 4) {
+                            console.log("quitting, found something not none, sub, up, average, paeth");
                             break;
                         }
 
@@ -396,6 +550,26 @@ PDFImage.prototype.read = function() {
                                         var priorIndex = (rowIndex - 1) * this.width * numberComponents + columnIndex * numberComponents + componentIndex;
                                         columnData.push((givenByte + unpredictedData[priorIndex]) % 256);
                                     }
+                                }
+                                else if (predictorValue == 3) {
+                                    // average.
+                                    var left = 0;
+                                    var up = 0;                                    
+
+                                    // can we get an up?
+                                    if (rowIndex > 0) {
+                                        var priorIndex = (rowIndex - 1) * this.width * numberComponents + columnIndex * numberComponents + componentIndex;
+                                        up = unpredictedData[priorIndex];
+                                    }
+
+                                    // can we get a left?
+                                    if (columnIndex > 0) {
+                                        // left exists.
+                                        left = columnData[columnData.length - numberComponents];
+                                    }
+
+                                    var unaverage = Math.floor((left + up) / 2);
+                                    columnData.push((givenByte + unaverage) % 256);
                                 }
                                 else if (predictorValue == 4) {
                                     // paeth.
@@ -927,11 +1101,47 @@ function PDFPageResources(document, root) {
     this.document = document;
     this.root = root;
     this.xobject = null;
+    this.colorspaces = {};
 
     var xobjectValue = this.document.reader.queryDictionaryObject(
         this.root, PDFPageResources.XObjectKey);
     if (xobjectValue !== undefined) {
         this.xobject = new PDFExternalObject(this.document, xobjectValue);
+    }
+
+    // ColorSpaces can be defined at the page resource level.
+    var colorSpaceValue = this.document.reader.queryDictionaryObject(
+        this.root, PDFImage.ColorSpaceKey);
+    if (colorSpaceValue != undefined) {
+        console.log("PDF page has colorspaces defined directly on it. Reading these.");
+        var objectNames = Object.keys(colorSpaceValue.toJSObject());
+        for (var objectNameIndex = 0; objectNameIndex < objectNames.length; objectNameIndex++) {
+            var objectName = objectNames[objectNameIndex];
+            var objectValue = this.document.reader.queryDictionaryObject(
+                colorSpaceValue, objectName);
+
+            if (objectValue.getType() == pdf.ePDFObjectArray) {
+                // Going to properly handle this at some point.
+                var spaceName = this.document.reader.queryArrayObject(
+                    objectValue, 0);
+                if (spaceName == PDFColorSpace.ICCBasedColorSpace) {
+                    var space = new ICCColorSpace(
+                        this.document,
+                        this.document.reader.queryArrayObject(objectValue, 1));
+                    space.read();
+
+                    this.colorspaces[objectName] = space;                    
+                }
+                else if (spaceName == PDFColorSpace.PatternColorSpace) {
+                    console.log("ignoring \"Pattern\" color space for now");
+                }
+                else {
+                    console.log("unknown space! " + spaceName);
+                }
+            }
+            // Figure out what kind of
+            //     this.colorspaces[objectName] = 
+        }
     }
 }
 
@@ -1011,10 +1221,6 @@ function PDFDocument(path, debug) {
     this.pages = [];
 
     for (var pageNumber = 0; pageNumber < this.numberPages; pageNumber++) {
-        if (this.debug) {
-            console.log("reading page: " + pageNumber);
-        }
-        
         var pageMetadata = this.reader.parsePageDictionary(pageNumber);
         var pageInput = this.reader.parsePage(pageNumber);
         var page = new PDFPage(this, pageNumber, pageMetadata, pageInput);

@@ -46,10 +46,18 @@ function PDFSyncer(wiki, debug) {
 }
 
 PDFSyncer.prototype.startWatching = function() {
+    // Watches Tiddler -> "pdf" association on the _client_.
     if (!$tw.node) {
+        // $tw.hooks.addHook("th-saving-tiddler", function(tiddler) {
+        //     if (PDF_FIELD_NAME in tiddler.fields) {
+        //         $tw.syncadaptor.savePDF(tiddler);
+        //     }
+        // }.bind(this));
+
         return;
     }
     
+    // Watches the FS.
     fs.watch(this.root, function(eventType, filename) {
         if (eventType == "rename") {
             if (filename.endsWith(".pdf")) {
@@ -87,7 +95,7 @@ PDFSyncer.prototype.createMetadata = function(document, title) {
         "subject": document.metadata.subject || "",
         "keywords": document.metadata.keywords || "",
         "pages": document.numberPages
-    }
+    };
 
     var metadataTiddlers = [];
     // Add a tiddler at $:/pdf/blah.pdf/outline.
@@ -126,7 +134,8 @@ PDFSyncer.prototype.createMetadata = function(document, title) {
         objectData["referenced"] = referencedNames;
 
         // this will be really exciting.
-        console.log("generating thumbnails for: ");
+        console.log("Generating thumbnails for figures on page " + pageIndex);
+        console.log("Referenced names include:");
         console.log(referencedNames);
         var pagePromises = [];
         for (var referencedNameIndex = 0; referencedNameIndex < referencedNames.length; referencedNameIndex++) {
@@ -158,7 +167,7 @@ PDFSyncer.prototype.createMetadata = function(document, title) {
                         });
                     });
                 }).catch(function(err) {
-                    console.log("thumbnail error: " + referencedName);
+                    console.log("Thumbnail generation error for " + referencedName);
                     console.log(err);
                 });
             }));
@@ -187,6 +196,10 @@ PDFSyncer.prototype.createMetadata = function(document, title) {
             let thumbnailData = {};
             for (let thumbnailIndex = 0; thumbnailIndex < thumbnails.length; thumbnailIndex++) {
                 let thumbnail = thumbnails[thumbnailIndex];
+                if (thumbnail == null || thumbnail == undefined) {
+                    continue;
+                }
+                
                 thumbnailData[thumbnail.key] = thumbnail.value;
             }
             
@@ -252,12 +265,11 @@ PDFSyncer.prototype.syncTiddler = function(tiddler) {
 
     // only can do this on the server.
     if (!dataTiddler || REBUILD) {
-        console.log("failed to find " + metadataTitle);
-        //if (pdfName == "Tulsiani_Factoring_Shape_Pose_CVPR_2018_paper.pdf") {
+        console.log("Failed to find " + metadataTitle);
         return this.addMetadataTiddler(pdfName);
-        //}
     }
 
+    console.log("Data tiddler was found. Not doing anything.");
     return Promise.resolve(dataTiddler);
 }
 
